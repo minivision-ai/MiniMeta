@@ -1,0 +1,9 @@
+[submodule "modules/minimeta_kinematics"]
+	path = modules/minimeta_kinematics
+	url = https://github.com/minivision-ai/MiniMeta-Kinematics.git
+[submodule "modules/minimeta_face"]
+	path = modules/minimeta_face
+	url = https://github.com/minivision-ai/MiniMeta-Face.git
+[submodule "modules/minimeta_pose"]
+	path = modules/minimeta_pose
+	url = https://github.com/minivision-ai/MiniMeta-Pose.git
