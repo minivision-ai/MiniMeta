@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh">
+	<head>
+		<title>three.js webgl - loaders - MMD loader</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				font-family: Monospace;
+				color: #000;
+				margin: 0px;
+				overflow: hidden;
+			}
+			
+		</style>
+	</head>
+
+	<body>
+
+		<div id="bone_info" style="position:absolute;right:5px;bottom:5px;border:1px solid #aaa;color: #0F0; font-size: xx-large;">
+			
+		</div>
+
+		<script src="libs/socket.io.min.js"></script>
+		<script src="libs/three/ammo.wasm.js"></script>
+		<script>
+			
+		</script>
+
+		<script type="module">
+
+			import { GUI } from './libs/three/examples/jsm/modules/lil-gui.module.min.js';
+			import * as THREE from './libs/three/build/three.module.js';
+			import { OrbitControls } from './libs/three/examples/jsm/modules/OrbitControls.js';
+			import { MMDLoader } from './libs/three/examples/jsm/modules/MMDLoader.js';
+			import { MMDAnimationHelper } from './libs/three/examples/jsm/modules/MMDAnimationHelper.js';
+			import { OutlineEffect } from './libs/three/examples/jsm/modules/OutlineEffect.js';
+
+			let mesh, camera, controls, scene, renderer, skeleton, bonePoints, effect;
+			let stats, time;
+			let helper, ikHelper, physicsHelper;
+			let raycaster;
+			let interpolationFlag;
+			let rotationLast, rotationCurrent,rotationUpdate;
+			let updateRotationDelta, cusumRotationDelta, updateRotationFlag;
+			let blendshapeLast, blendshapeCurrent,blendshapeUpdate;
+			let updateBlendshapeDelta, cusumBlendshapeDelta, updateBlendshapeFlag;
+			var morphDict, morphControls, morphControlsTest, keys, keysTest, morphs, morphsTest;
+			var root_init_x, root_init_y, root_init_z, root_init;
+			const clock = new THREE.Clock();
+			const rotationUpdateClock = new THREE.Clock();
+			const blendshapeUpdateClock = new THREE.Clock();
+			
+
+			Ammo().then( function ( AmmoLib ) {
+				Ammo = AmmoLib;
+				init();
+			} );
+			
+
+			function makePhongMaterials( materials ) {
+
+				var array = [];
+
+				for ( var i = 0, il = materials.length; i < il; i ++ ) {
+
+					var m = new THREE.MeshPhongMaterial();
+					m.copy( materials[ i ] );
+					m.needsUpdate = true;
+
+					array.push( m );
+
+				}
+
+				return array;
+			}
+
+
+			function init() {
+				updateRotationDelta = -1;
+				updateRotationFlag = false;
+				updateBlendshapeDelta = -1;
+				updateBlendshapeFlag = false;
+				interpolationFlag = true;
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2000 );
+				camera.position.z = 60;
+				camera.position.y = 8;
+
+				scene = new THREE.Scene();
+                                scene.background = new THREE.Color(0xffffff);
+				
+				//var geometry = new THREE.PlaneGeometry( 80, 80 );
+                //geometry.rotateX(Math.PI/2);
+				//var material = new THREE.MeshBasicMaterial( {color: 0xa0a0a0, side: THREE.DoubleSide} );
+				//var plane = new THREE.Mesh( geometry, material );
+				//scene.add( plane );
+				//var plane = new THREE.Plane( new THREE.Vector3( 0, 1, 0 ),0 );
+				//var plane_helper = new THREE.PlaneHelper( plane, 80, 0xa0a0a0 );
+				//scene.add( plane_helper );
+																																																							
+				//var gridHelper = new THREE.GridHelper( 200, 10 );
+				//var axes = new THREE.AxisHelper(200);
+				//scene.add( axes );
+
+				const ambient = new THREE.AmbientLight( 0x555555 );
+				scene.add( ambient );
+
+				const directionalLight = new THREE.DirectionalLight( 0x555555 );
+				directionalLight.position.set( - 1, 1, 1 ).normalize();
+				scene.add( directionalLight );
+
+				renderer = new THREE.WebGL1Renderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				controls = new OrbitControls( camera, renderer.domElement );
+				camera.lookAt(0, 10, 0);
+				controls.target.set(0, 10, 0);
+				
+				document.body.appendChild( renderer.domElement );
+
+				effect = new OutlineEffect( renderer );
+				
+
+				raycaster = new THREE.Raycaster();
+
+				const modelFile = 'resources/mmd_models/miku/miku_v2.pmd';
+
+				
+				helper = new MMDAnimationHelper( {
+					afterglow: 2.0
+				} );
+
+				const loader = new MMDLoader();
+
+				function onProgress( xhr ) {
+					if ( xhr.lengthComputable ) {
+						const percentComplete = xhr.loaded / xhr.total * 100;
+						console.log( Math.round( percentComplete, 2 ) + '% downloaded' );
+					}
+				}
+
+				loader.load( modelFile, function ( object ) {
+					mesh = object;
+					if(mesh.geometry.userData.MMD.format == 'MMD'){
+						mesh.geometry.userData.MMD.iks[5].links[0].enabled = false;
+						mesh.geometry.userData.MMD.iks[6].links[0].enabled = false;
+					}
+
+					helper.add( mesh, {
+						physics: true,
+						maxStepNum: 20,
+						unitStep:1/100,
+						gravity:new THREE.Vector3( 0, - 6.8 * 10, 0 )
+					} );
+					console.log(helper)
+					console.log(mesh);
+					scene.add( mesh );
+
+					skeleton = new THREE.SkeletonHelper( mesh );
+					console.log(skeleton);
+					skeleton.visible = false;
+					scene.add( skeleton );
+
+					var pointMaterial = new THREE.PointsMaterial( {
+						color: 0x0000FF,
+						depthTest: false,
+						depthWrite: false,
+						size: 10,
+						sizeAttenuation: false
+					} );
+					
+					var bones = mesh.skeleton.bones;
+					for (var i = 0; i < bones.length; i++) {
+						var b = makeBonePoint(bones[i]);
+						bonePoints.push(b);
+					} 
+
+					root_init = mesh.skeleton.bones.find(x => {return x.name == 'センター'}).position
+                    root_init_x = root_init.x;
+                    root_init_y = root_init.y;
+                    root_init_z = root_init.z;
+
+					initGui();
+					animate();
+
+				}, onProgress, onProgress , onProgress);
+
+				window.addEventListener( 'resize', onWindowResize );
+			
+			}
+			const boneMaterial = new THREE.MeshBasicMaterial( { 
+				color: 0x00ff00,
+				depthTest: false,
+				depthWrite: false,
+				visible: false
+			} );
+
+			const highlightBoneMaterial = new THREE.MeshBasicMaterial( { 
+				color: 0x0000ff,
+				depthTest: false,
+				depthWrite: false,
+				visible: false
+			} );
+
+			const checkedBoneMaterial = new THREE.MeshBasicMaterial( { 
+				color: 0xff0000,
+				depthTest: false,
+				depthWrite: false,
+				visible: false
+			} );
+
+			bonePoints = [];
+
+			function makeBonePoint(bone){
+				var geometry = new THREE.SphereGeometry( 0.1, 32, 16 );
+				var sphere = new THREE.Mesh( geometry, boneMaterial );
+				sphere.renderOrder = 99;
+				bone.add(sphere);
+				return sphere;
+			}
+		
+			
+			let highLightBone;
+			let checkedBone;
+
+			function render() {
+				effect.render( scene, camera );
+			}
+
+			function initGui() {
+				
+				const api = {
+					'outline': true,
+					'physics': true,
+					'skeleton': false,
+					'interpolation':false,
+				};
+
+
+				const gui = new GUI();
+
+				gui.add( api, 'physics' ).onChange( function () {
+					helper.enable( 'physics', api[ 'physics' ] );
+				} );
+
+				gui.add( api, 'outline' ).onChange( function () {
+					effect.enabled = api[ 'outline' ];
+				} );
+
+				gui.add( api, 'skeleton' ).onChange( function () {
+					skeleton.visible = api[ 'skeleton' ];
+					boneMaterial.visible = api[ 'skeleton' ];
+					highlightBoneMaterial.visible = api[ 'skeleton' ];
+					checkedBoneMaterial.visible = api[ 'skeleton' ];
+					boneAxes.visible = api[ 'skeleton' ];
+					info_div.style.display = api[ 'skeleton' ]?'block':'none';
+				} );
+
+				gui.add( api, 'interpolation' ).onChange( function () {
+					interpolationFlag=api['interpolation'];
+				} );
+
+				morphDict = mesh.morphTargetDictionary;
+				morphControls = {};
+				morphControlsTest = {};
+				keys = [];
+				keysTest = [];
+				morphs = gui.addFolder( 'Morphs' );
+				morphsTest = gui.addFolder( 'MorphsTest' );
+				initmorphControls();
+				initKeys();
+				initMorphs();
+				onChangeMorph();
+			}
+
+			function getBaseName( s ) {
+					return s.slice( s.lastIndexOf( '/' ) + 1 );
+			}
+			function initmorphControls() {
+				for ( const key in blendshapeMap ) {
+					morphControls[ blendshapeMap[key] ] = 0.0;
+				}
+				for (const key in morphDict) {
+					if (!morphControls[key]){
+						morphControlsTest[ key ] = 0.0;
+					}
+				}
+			}
+
+			function initKeys() {
+				for ( const key in blendshapeMap ) {
+					keys.push( blendshapeMap[key] );
+				}
+				for (const key in morphDict) {
+					if (!morphControls[key]){
+						keysTest.push(key);
+					}
+				}
+			}
+
+
+			function initMorphs() {
+				for ( const key in morphControls ) {
+					morphs.add( morphControls, key, 0.0, 1.0, 0.01 ).onChange( onChangeMorph ).listen();
+				}
+				for ( const key in morphControlsTest ) {
+					morphsTest.add( morphControlsTest, key, 0.0, 1.0, 0.01 ).onChange( onChangeMorphTest ).listen();
+				}
+			}
+
+			function onChangeMorph() {
+				for ( let i = 0; i < keys.length; i ++ ) {
+					const key = keys[ i ];
+					const value = morphControls[ key ];
+					mesh.morphTargetInfluences[morphDict[key] ] = value;
+				}
+			}
+
+			function onChangeMorphTest() {
+				for ( let i = 0; i < keysTest.length; i ++ ) {
+					const key = keysTest[ i ];
+					const value = morphControlsTest[ key ];
+					mesh.morphTargetInfluences[morphDict[key] ] = value;
+				}
+			}
+
+
+			//Mouse
+			const mouse = new THREE.Vector2();
+
+			function onMouseMove( event ) {
+				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+			}
+
+			window.addEventListener( 'mousemove', onMouseMove, false );
+
+			const boneAxes = new THREE.AxisHelper(2);
+			boneAxes.material.depthTest=false;
+
+			function onMouseDown( event ) {
+				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+				if(boneMaterial.visible){
+					raycaster.setFromCamera( mouse, camera );
+					const intersects = raycaster.intersectObjects( bonePoints, false);
+					if(intersects.length>0){
+						//console.log(intersects);
+						checkedBone && (checkedBone.material = boneMaterial);
+						checkedBone = intersects[ 0 ].object;
+						checkedBone.material = checkedBoneMaterial;
+						checkedBone.add(boneAxes);
+					}
+				}
+			}
+
+			window.addEventListener( 'mousedown', onMouseDown, false );
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				render();
+			}
+
+			const info_div = document.getElementById("bone_info");
+
+			function updateBoneInfo(){
+				if(checkedBone){
+					var bone = checkedBone.parent;
+					var info = `
+						name: ${bone.name} </br>
+						position: (${bone.position.x.toFixed(4)}, ${bone.position.y.toFixed(4)}, ${bone.position.z.toFixed(4)}) </br>
+						quaternion: (${bone.quaternion.x.toFixed(4)}, ${bone.quaternion.y.toFixed(4)}, ${bone.quaternion.z.toFixed(4)}, ${bone.quaternion.w.toFixed(4)})
+					`;
+					info_div.innerHTML = info;
+					
+				}
+			}
+
+			function animate() {
+				var webDelta;
+				requestAnimationFrame( animate );
+				if(boneMaterial.visible){
+					if(highLightBone && highLightBone!=checkedBone){
+						highLightBone.material = boneMaterial;
+					}
+					highLightBone = null;
+					raycaster.setFromCamera( mouse, camera );
+					const intersects = raycaster.intersectObjects( bonePoints , false);
+					if(intersects.length>0){
+						highLightBone = intersects[ 0 ].object;
+						if(highLightBone != checkedBone){
+							highLightBone.material = highlightBoneMaterial;
+						}
+					}
+					updateBoneInfo();
+				}
+				webDelta = clock.getDelta();
+				if (interpolationFlag & updateRotationDelta>0){
+					animationUpdateRotation(webDelta);
+				}
+				if (interpolationFlag & updateBlendshapeDelta>0){
+					animationUpdateBlendshape(webDelta);
+				}
+				helper.update( webDelta );
+				render();
+			}
+
+            function animationUpdateRotation(webDelta){
+				if (updateRotationFlag){
+					cusumRotationDelta = 0;
+					updateRotationFlag = false;
+					rotationLast = rotationUpdate;
+				}
+				cusumRotationDelta = cusumRotationDelta+webDelta;
+				var slerpRatio = cusumRotationDelta/updateRotationDelta;
+				if (slerpRatio<=1){
+					rotationUpdate = rotationSlerp(rotationLast, rotationCurrent, slerpRatio);
+					updateRotation(rotationUpdate);	
+				}
+				else{
+					updateRotation(rotationCurrent);	
+				}
+			}
+
+			function animationUpdateBlendshape(webDelta){
+				if (updateBlendshapeFlag){
+					cusumBlendshapeDelta = 0;
+					updateBlendshapeFlag = false;
+					blendshapeLast = blendshapeUpdate;
+				}
+				cusumBlendshapeDelta = cusumBlendshapeDelta+webDelta;
+				var slerpRatio = cusumBlendshapeDelta/updateBlendshapeDelta;
+				if (slerpRatio<=1){
+					blendshapeUpdate = blendshapeSlerp(blendshapeLast, blendshapeCurrent, slerpRatio)
+					updateBlendshape(blendshapeUpdate);	
+				}
+				else{
+					updateBlendshape(blendshapeCurrent);	
+				}
+			}
+			const socket = io(window.location.host);
+			
+			socket.on('data', function(data){
+				var rotations = data.body_rotation;
+				var blendshapes = data.blendshapes;
+				var translation = data.translation;
+				if(rotations && mesh){
+					dealRotation(rotations);					
+				}
+				if (translation && mesh){
+					dealTranslation(translation);
+				}
+				if (blendshapes && mesh){
+					dealBlendshape(blendshapes);
+				}
+			});
+
+			//update blendshape
+			const blendshapeMap = {
+				"eyeBlinkLeft": "ウィンク", "eyeBlinkRight": "ウィンク右", "eyeWide": "びっくり",
+                "browUp": "上", "browDown": "下", 
+                "mouthOpen": "あ", "cheekPuff": "輪郭",
+                "mouthSmile": "口角上げ", "mouthFrown": "口角下げ"
+			}
+			
+			function dealBlendshape(blendshapes){
+				blendshapeCurrent = blendshapeConvert(blendshapes);
+				if (interpolationFlag){
+					if (updateBlendshapeDelta<0.016 || updateBlendshapeDelta>0.5){
+						blendshapeLast = blendshapeCurrent
+						blendshapeUpdate = blendshapeCurrent;
+						updateBlendshapeDelta = blendshapeUpdateClock.getDelta();
+					}
+					else{
+						updateBlendshapeDelta = blendshapeUpdateClock.getDelta();
+						updateBlendshapeFlag = true
+					}
+				}
+				else{
+					updateBlendshape(blendshapeCurrent);
+					blendshapeUpdate = blendshapeCurrent;
+				}
+			}
+			
+			function blendshapeConvert(data_blendshape){
+				var blendshapes={'browUp' : (data_blendshape['browOuterUpLeft'] + data_blendshape['browOuterUpRight']) / 2,
+                                'browDown' : (data_blendshape['browDownLeft'] + data_blendshape['browDownRight']) / 2,
+                                'eyeBlinkRight' : data_blendshape['eyeBlinkLeft'],
+                                'eyeBlinkLeft' : data_blendshape['eyeBlinkRight'],
+                                'eyeWide' : (data_blendshape['eyeWideLeft'] + data_blendshape['eyeWideRight']) / 2,
+                                'mouthOpen' : data_blendshape['jawOpen'],
+                                'mouthSmile' : (data_blendshape['mouthSmileLeft'] + data_blendshape['mouthSmileRight']) / 2,
+                                'mouthFrown' : (data_blendshape['mouthFrownLeft'] + data_blendshape['mouthFrownRight']) / 2,
+                                // 'mouthPucker' : data_blendshape['mouthPucker'],
+                                'cheekPuff' : data_blendshape['cheekPuff']}
+                                
+                if (blendshapes['browUp'] > blendshapes['browDown']){
+                    blendshapes['browUp'] = blendshapes['browUp'] - blendshapes['browDown'];
+                    blendshapes['browDown'] = 0
+                }
+                else{
+                    blendshapes['browDown'] = blendshapes['browDown'] - blendshapes['browUp'];
+                    blendshapes['browUp'] = 0
+                }
+                
+                if (blendshapes['mouthSmile'] > blendshapes['mouthFrown']){
+                    blendshapes['mouthSmile'] = blendshapes['mouthSmile'] - blendshapes['mouthFrown'];
+                    blendshapes['mouthFrown'] = 0
+                }
+                else{
+                    blendshapes['mouthFrown'] = blendshapes['mouthFrown'] - blendshapes['mouthSmile'];
+                    blendshapes['mouthSmile'] = 0
+                }
+				return blendshapes
+			}
+
+			function blendshapeSlerp(blendshapeLast, blendshapeCurrent, factor){
+				var blendshapeSlerp = {};
+				Object.keys(blendshapeCurrent).forEach( key => {
+					if(blendshapeLast[key]){
+						var blendshape0 = blendshapeLast[key];
+						var blendshape1 = blendshapeCurrent[key];
+						blendshapeSlerp[key] = blendshape0+(blendshape1-blendshape0)*factor;
+					}
+					else{
+						blendshapeSlerp[key] = blendshapeCurrent[key];
+					}
+				})
+				return blendshapeSlerp;
+			}
+
+			function updateBlendshape(blendshapes){
+				
+				for (var key in blendshapeMap){
+					morphControls[ blendshapeMap[key] ] = blendshapes[key]
+				}
+				onChangeMorph();
+			}
+
+			function dealTranslation(global_translation){
+				const temp_vector = new THREE.Vector3();
+                var bone_root = mesh.skeleton.bones.find(x => {return x.name == 'センター'});
+                bone_root.position.set(root_init_x, root_init_y, root_init_z);
+                                       
+                var bone_left_foot = mesh.skeleton.bones.find(x => {return x.name == '左つま先'});
+                var bone_right_foot = mesh.skeleton.bones.find(x => {return x.name == '右つま先'});
+                
+                var translation_y_left_foot = bone_left_foot.getWorldPosition(temp_vector).y;
+                var translation_y_right_foot = bone_right_foot.getWorldPosition(temp_vector).y;
+                var translation_y = Math.min(translation_y_left_foot, translation_y_right_foot);
+                
+                bone_root.position.set(root_init_x+global_translation[0]*20,
+                                       root_init_y-translation_y,
+                                       root_init_z-global_translation[2]*20+30);
+		bone_root.getWorldPosition(temp_vector);
+			}
+
+			function dealRotation(rotations){
+				rotationCurrent=quaternionConvert(rotations);
+				twistRotationCompute();
+				if (interpolationFlag){
+					if (updateRotationDelta<0.016 || updateRotationDelta>0.5){
+						rotationLast = rotationCurrent
+						rotationUpdate = rotationCurrent;
+						updateRotationDelta = rotationUpdateClock.getDelta();
+					}
+					else{
+						updateRotationDelta = rotationUpdateClock.getDelta();
+						updateRotationFlag = true
+					}
+				}
+				else{
+					updateRotation(rotationCurrent);
+					rotationUpdate = rotationCurrent;
+				}
+			}
+
+			function quaternionConvert(rotations){
+				var quaternions = {}
+				Object.keys(rotations).forEach( key =>{
+					var quat = new THREE.Quaternion(rotations[key].rotation[0],rotations[key].rotation[1],rotations[key].rotation[2],rotations[key].rotation[3]);
+					quaternions[key] = quat;
+				})
+				return quaternions;
+			}
+
+            function rotationSlerp(rotationLast, rotationCurrent, factor){
+				var rotationSlerp = {}
+				var rotationTemp = new THREE.Quaternion();
+				
+				Object.keys(rotationCurrent).forEach( key => {
+					if(rotationLast[key]){
+						var rotation0 = rotationLast[key];
+						var rotation1 = rotationCurrent[key];
+						rotationTemp.slerpQuaternions(rotation0, rotation1, factor);
+						rotationSlerp[key] = rotationTemp.clone();
+					}
+					else{
+						rotationSlerp[key] = rotationCurrent[key];
+					}
+				})
+				
+				return rotationSlerp;
+			}
+
+			function twistRotationCompute(){
+				Object.keys(boneTwistMap).forEach( key => {
+					if (!rotationCurrent[key].equals(new THREE.Quaternion(0,0,0,1))){
+						var num = boneTwistMap[key].length;
+						//compute axis vector
+						var endJoint = mesh.skeleton.bones.find(x => {return x.name == boneQuarternionMap[boneTwistMap[key][1]]});
+						var rotateAxis = endJoint.position.clone();
+						// var rotateAxis = new THREE.Vector3(-1.92, -1.46, 0.04);
+						rotateAxis.normalize();
+						//convert axis vector to xAxis ->new CS
+						var tempQuaternion = new THREE.Quaternion();
+						tempQuaternion.setFromUnitVectors(rotateAxis, new THREE.Vector3(1,0,0));
+						//compute end bone rotation axisAngle
+						var endBoneRotateAxisAngle = new THREE.Vector4();
+						endBoneRotateAxisAngle.setAxisAngleFromQuaternion(rotationCurrent[key]);
+					
+						//compute hand rotation in new CS
+						var endBoneRotateAxis=new THREE.Vector3(endBoneRotateAxisAngle.x,endBoneRotateAxisAngle.y,endBoneRotateAxisAngle.z);
+						endBoneRotateAxis.applyQuaternion(tempQuaternion);
+						var endBoneQuaternion = new THREE.Quaternion();
+						endBoneQuaternion.setFromAxisAngle(endBoneRotateAxis,endBoneRotateAxisAngle.w);
+
+						//convert quaternion to euler
+						var endBoneEuler = new THREE.Euler();
+						endBoneEuler.setFromQuaternion(endBoneQuaternion);
+						var rotateAxisAngle = endBoneEuler.x;
+						//rotate axis in parent CS
+						var localRotationAxis = new THREE.Vector3();
+						var localRotationAxis = rotateAxis.clone();
+						localRotationAxis.applyQuaternion(rotationCurrent[boneTwistMap[key][0]]);
+						localRotationAxis.normalize();
+						
+						//start joint twist quaterion
+						var startJointQuaternion = new THREE.Quaternion();
+						startJointQuaternion.setFromAxisAngle(localRotationAxis, rotateAxisAngle/num);
+						startJointQuaternion.multiply(rotationCurrent[boneTwistMap[key][0]]);
+						rotationCurrent[boneTwistMap[key][0]]=startJointQuaternion.clone();
+
+						
+						//midldle joints twist rotation
+						var twistQuaternion = new THREE.Quaternion();
+						twistQuaternion.setFromAxisAngle(rotateAxis, rotateAxisAngle/num);
+						
+						for(var i=1; i<num-1; i++){
+							rotationCurrent[boneTwistMap[key][i]] = twistQuaternion.clone();
+						}
+						
+						//end joint twist rotation
+						var elbowTwsitQuaternion = new THREE.Quaternion();
+						elbowTwsitQuaternion.setFromAxisAngle(rotateAxis, rotateAxisAngle*(num-1)/num);
+						rotationCurrent[key].multiply(elbowTwsitQuaternion.invert());
+						
+					}
+				})
+			}
+
+			
+			const boneQuarternionMap={
+				spine_mid_up: ['上半身'], spine_mid_down: ['下半身'], neck: ['首'], head: ['頭'],sleeve_left:['左袖'], sleeve_right:['右袖'],
+				hip_left: ['左足', '左足D'], knee_left: ['左ひざ', '左ひざD'], hip_right: ['右足', '右足D'], knee_right: ['右ひざ', '右ひざD'],
+				shoulder_left: ['左腕'], elbow_left: ['左ひじ'], wrist_left: ['左手首'], shoulder_right: ['右腕'],
+				elbow_right: ['右ひじ'], wrist_right: ['右手首'], ankle_left: ['左足首', '左足首D'], ankle_right: ['右足首', '右足首D'],
+				elbow_twist_left:['左手捩'],elbow_twist_right:['右手捩'],
+				thumb_left2: ['左親指１'], thumb_left3: ['左親指２'], thumb_left4: ['左親指先'],
+				index_left1: ['左人指１'], index_left2: ['左人指２'], index_left3: ['左人指３'], index_left4: ['左人差指先'],
+				middle_left1: ['左中指１'], middle_left2: ['左中指２'], middle_left3: ['左中指３'], middle_left4: ['左中指先'],
+				ring_left1: ['左薬指１'], ring_left2:['左薬指２'], ring_left3:['左薬指３'], ring_left4:['左薬指先'], 
+				little_left1: ['左小指１'], little_left2: ['左小指２'], little_left3: ['左小指３'], little_left4: ['左小指先'],
+				thumb_right2: ['右親指１'], thumb_right3: ['右親指２'], thumb_right4: ['右親指先'],
+				index_right1: ['右人指１'], index_right2: ['右人指２'], index_right3: ['右人指３'], index_right4: ['右人差指先'],
+				middle_right1: ['右中指１'], middle_right2: ['右中指２'], middle_right3: ['右中指３'], middle_right4: ['右中指先'],
+				ring_right1: ['右薬指１'], ring_right2:['右薬指２'], ring_right3:['右薬指３'], ring_right4:['右薬指先'], 
+				little_right1: ['右小指１'], little_right2: ['右小指２'], little_right3: ['右小指３'], little_right4: ['右小指先'],
+			}
+
+			const boneTwistMap={
+				wrist_left:['elbow_left','elbow_twist_left','wrist_left'],//父节点：子节点
+				wrist_right:['elbow_right','elbow_twist_right', 'wrist_right'],
+			}
+
+			function updateRotation(rotations){
+				Object.keys(boneQuarternionMap).forEach( key => {
+					if(rotations[key]){
+						boneQuarternionMap[key].forEach(name => {
+							var bone = mesh.skeleton.bones.find(x => {return x.name == name});
+							if(bone){
+								bone.quaternion.set(rotations[key].x,rotations[key].y,rotations[key].z,rotations[key].w);
+								bone.updateMatrixWorld(true);
+								
+							}
+						})
+					}
+				})
+			}
+			
+
+		</script>
+
+	</body>
+</html>

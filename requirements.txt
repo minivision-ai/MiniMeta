@@ -1,0 +1,7 @@
+opencv-python==4.5.5.64
+onnxruntime==1.6
+aiohttp==3.7.4
+aiosignal==1.2.0
+socketio-client==0.7.2
+python-socketio==5.3.0
+three-py==0.0.2
