@@ -63,8 +63,11 @@ Tip: The CPU version of onnxruntime is installed by default. If you need to use 
 ```
 python demo/meta_demo.py
 ```
+
+2. Access page http://127.0.0.1:5000/MiniMeta.html in Chrome browser.
+
 <div align="center">
   <img src="docs/images/upper_body.gif" width = "400" />
 </div>
 
-2. Access page http://127.0.0.1:5000/MiniMeta.html in Chrome browser.
+Welcome to join the technical communication QQ group：227192120

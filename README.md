@@ -66,6 +66,7 @@ python demo/meta_demo.py
 ```
 
 2. chrome浏览器访问页面：http://127.0.0.1:5000/MiniMeta.html
+
 <div align="center">
   <img src="docs/images/upper_body.gif" width = "400" />
 </div>
